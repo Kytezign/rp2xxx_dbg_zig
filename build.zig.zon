@@ -1,0 +1,25 @@
+.{
+    .name = .rp2xxx_dbg,
+    .version = "0.1.0",
+    .fingerprint = 0x8f84913e21f5ab66,
+    .minimum_zig_version = "0.15.1",
+    .dependencies = .{
+        .linux_picotool = .{
+            .url = "https://github.com/raspberrypi/pico-sdk-tools/releases/download/v2.2.0-3/picotool-2.2.0-a4-x86_64-lin.tar.gz",
+            .sha256 = "f4a6784fbb862520b797bfb3302c5b94f47664692d85d03c0a7fbee98065568d",
+            .hash = "N-V-__8AAO5NLACzo7YUdV_usxXNMx6JMw6lgasppVamaP9b",
+            .lazy = true,
+        },
+        .serial = .{
+            .url = "git+https://github.com/ZigEmbeddedGroup/serial.git#fbd7389ff8bbc9fa362aa74081588755b5d028a0",
+            .hash = "serial-0.0.1-PoeRzF60AAAN8Iu0yXTIX-t3DVzsnmN7vWHKM2HA2Zbq",
+            .lazy = true,
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "serialctrl.zig",
+        "README.md",
+    },
+}
