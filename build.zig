@@ -1,10 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const MissingLazyDep = error{
-    MissingLazyDep,
-};
-
 /// Returns "Load" step which loads the uf2 file into the connected rpxxxx device
 /// by first attempting to force it into the boot loader then loading with picotool
 pub fn getLoadStep(
@@ -12,10 +8,19 @@ pub fn getLoadStep(
     this_dep: *std.Build.Dependency,
     uf2_file: std.Build.LazyPath,
 ) !*std.Build.Step {
+    // Build an executable from the serialctrl.zig
+    const exe = root_build.addExecutable(.{
+        .name = "serialctrl",
+        .root_module = this_dep.module("serialctrl"),
+    });
+
+    // Add a build step for installing the executable
+    root_build.installArtifact(exe);
+
     // restart_step:   calls serialctrl with the reboot flag
     //                 depends on this_dep.builder.getInstallStep()
     // Create force reboot step - calling the executable with the argument "reboot"
-    const to_bootloader_cmd = root_build.addRunArtifact(this_dep.artifact("serialctrl"));
+    const to_bootloader_cmd = root_build.addRunArtifact(exe);
     to_bootloader_cmd.addArg("reboot");
     to_bootloader_cmd.has_side_effects = true;
     to_bootloader_cmd.step.name = "Force Reboot with Serial";
@@ -25,24 +30,19 @@ pub fn getLoadStep(
     // Find program should find the newly copied picotool in bin (if needed)
     const picotool_prog = root_build.findProgram(&.{"picotool"}, &.{}) catch blk: {
         // If not in path we'll try to pull it in from the lazy dep defined in zig.zon.
-        if (this_dep.builder.lazyDependency("linux_picotool", .{})) |picotool_dep| {
-            // TODO: only pulling linux currently should not be hard to add others
-            if (builtin.os.tag != .linux)
-                @panic("Only supports auto getting Linux version of picotool currently");
-            const install_picotool = root_build.addInstallBinFile(
-                picotool_dep.path("picotool/picotool"),
-                "picotool",
-            );
-            root_build.getInstallStep().dependOn(&install_picotool.step);
-            break :blk root_build.getInstallPath(
-                install_picotool.dir,
-                install_picotool.dest_rel_path,
-            );
-        } else {
-            // TODO: probbaly better way to handle this
-            // I guess if it's not avalible yet (lazy Dep) and there is no system level picotool...
-            return MissingLazyDep.MissingLazyDep;
-        }
+        if (builtin.os.tag != .linux)
+            @panic("Only supports auto getting Linux version of picotool currently");
+        const picotool_dep = this_dep.builder.dependency("linux_picotool", .{});
+        // TODO: only pulling linux currently should not be hard to add others
+        const install_picotool = root_build.addInstallBinFile(
+            picotool_dep.path("picotool/picotool"),
+            "picotool",
+        );
+        root_build.getInstallStep().dependOn(&install_picotool.step);
+        break :blk root_build.getInstallPath(
+            install_picotool.dir,
+            install_picotool.dest_rel_path,
+        );
     };
     const load_uf2_argv = [_][]const u8{ picotool_prog, "load" };
     const load_uf2_cmd = root_build.addSystemCommand(&load_uf2_argv);
@@ -67,8 +67,16 @@ pub fn getLoadStep(
 
 /// Return "Logging" step which will open the serial port using the generated serial control artifact.
 /// Must be explicitly chained to after load if that is desired.
-pub fn getLoggingStep(root_build: *std.Build, this_dep: *std.Build.Dependency) *std.Build.Step {
-    const log_cmd = root_build.addRunArtifact(this_dep.artifact("serialctrl"));
+pub fn getLoggingStep(root_build: *std.Build) *std.Build.Step {
+    // TODO: Must be a better way but I could not add the executable in build then get artifact for some reason...
+    var exe: ?*std.Build.Step.Compile = null;
+    for (root_build.install_tls.step.dependencies.items) |dep_step| {
+        const inst = dep_step.cast(std.Build.Step.InstallArtifact) orelse continue;
+        if (std.mem.eql(u8, inst.artifact.name, "serialctrl")) {
+            exe = inst.artifact;
+        }
+    }
+    const log_cmd = root_build.addRunArtifact(exe.?);
     log_cmd.has_side_effects = true;
     log_cmd.step.name = "Start Logging";
 
@@ -82,16 +90,13 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Build an executable from the serialctrl.zig
-    const exe = b.addExecutable(.{
-        .name = "serialctrl",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("serialctrl.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
+    const module = b.addModule("serialctrl", .{
+        .root_source_file = b.path("serialctrl.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
     });
+
     const vid = b.option(
         u16,
         "vid",
@@ -113,13 +118,8 @@ pub fn build(b: *std.Build) !void {
     options.addOption(u16, "vid", vid);
     options.addOption(u16, "pid", pid);
     options.addOption(u8, "magic_boot_char", magic_boot_char);
-    exe.root_module.addOptions("config", options);
+    module.addOptions("config", options);
 
-    if (b.lazyDependency("serial", .{})) |serial_dep| {
-        exe.root_module.addImport("serial", serial_dep.module("serial"));
-    } else {
-        return;
-    }
-    // Add a build step for installing the executable
-    b.installArtifact(exe);
+    const serial_dep = b.dependency("serial", .{});
+    module.addImport("serial", serial_dep.module("serial"));
 }

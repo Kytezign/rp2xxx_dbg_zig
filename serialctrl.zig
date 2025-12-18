@@ -10,7 +10,6 @@ const builtin = @import("builtin");
 // To do timeout stuff?
 const VTIME = 5;
 const VMIN = 6;
-
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
